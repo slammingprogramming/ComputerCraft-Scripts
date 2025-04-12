@@ -1,0 +1,122 @@
+if not turtle then
+  print("This program only runs on a turtle.")
+  return
+end
+
+local saplingSlot = 1
+local logSlot = 2
+local fuelThreshold = 100
+local dumpChestBelow = true -- Set to false if chest is behind
+local torchSlot = 3 -- Optional: set to 0 to disable
+
+-- Simple log prefix
+local function log(text)
+  print("[TreeFarm] " .. text)
+end
+
+local function refuel(minLevel)
+  local level = turtle.getFuelLevel()
+  if level == "unlimited" or level >= minLevel then return true end
+
+  for i = 3, 16 do
+    if i ~= saplingSlot and i ~= logSlot then
+      turtle.select(i)
+      if turtle.refuel(1) then
+        log("Refueled from slot " .. i)
+        return true
+      end
+    end
+  end
+
+  log("WARNING: Unable to refuel. Fuel level is " .. level)
+  return false
+end
+
+local function waitForTree()
+  turtle.select(logSlot)
+  log("Waiting for tree to grow...")
+  while not turtle.compare() do
+    sleep(5)
+  end
+end
+
+local function chopTree()
+  local height = 0
+  turtle.dig()
+  if not turtle.forward() then
+    log("Can't move forward!")
+    return false
+  end
+
+  turtle.select(logSlot)
+  while turtle.compareUp() do
+    turtle.digUp()
+    if not turtle.up() then break end
+    height = height + 1
+  end
+
+  for i = 1, height do
+    turtle.down()
+  end
+
+  turtle.back()
+  log("Tree chopped: " .. (height + 1) .. " blocks tall")
+  return true
+end
+
+local function replant()
+  turtle.select(saplingSlot)
+  if not turtle.place() then
+    log("ERROR: Failed to replant sapling!")
+  else
+    log("Sapling replanted.")
+  end
+end
+
+local function dumpInventory()
+  for i = 3, 16 do
+    turtle.select(i)
+    if turtle.getItemCount(i) > 0 then
+      if dumpChestBelow then
+        turtle.dropDown()
+      else
+        turtle.turnLeft()
+        turtle.turnLeft()
+        turtle.drop()
+        turtle.turnRight()
+        turtle.turnRight()
+      end
+    end
+  end
+  log("Inventory dumped.")
+end
+
+local function placeTorchIfNeeded()
+  if torchSlot > 0 then
+    turtle.select(torchSlot)
+    turtle.placeDown()
+    log("Torch placed (if needed).")
+  end
+end
+
+-- MAIN LOOP
+while true do
+  log("Tree farm loop start")
+  if not refuel(fuelThreshold) then
+    log("Low fuel — pausing until refueled.")
+    sleep(10)
+    goto continue
+  end
+
+  waitForTree()
+  local chopped = chopTree()
+  if chopped then
+    refuel(fuelThreshold)
+    replant()
+    dumpInventory()
+    placeTorchIfNeeded()
+  end
+
+  ::continue::
+  sleep(1)
+end
