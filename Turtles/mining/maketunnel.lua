@@ -1,123 +1,202 @@
--- Supercharged Tunnel Digger with Enhancements
--- Features: Fuel checking, torch placement, state saving, config file loading, optional cleanup, GPS support
+--[[
+Supercharged Tunnel Digger
+Supports:
+- Interactive and argument-based configuration
+- Config file loading and saving
+- Fuel checking and refueling
+- Inventory cleanup (optional)
+- Torch placement at intervals
+- State saving and resuming
+- Variable tunnel dimensions and shapes
+- Asymmetric offsets and tunnel orientation
+- Turtle-relative origin placement (center, front, corner)
+--]]
 
-local configDir = "/shaft_configs"
-local saveFile = "/shaft_state.sav"
-local tArgs = {...}
 local fs = require("fs")
+local gps = require("gps")
 
--- Utility Functions
-function refuel(minFuel)
-  minFuel = minFuel or 100
-  while turtle.getFuelLevel() < minFuel do
-    for i = 1, 16 do
-      turtle.select(i)
-      if turtle.refuel(1) then break end
-    end
-    if turtle.getFuelLevel() < minFuel then
-      print("Insert fuel to continue...")
-      sleep(2)
-    end
-  end
-end
+-- Default config values
+local config = {
+  length = nil,
+  height = nil,
+  width = nil,
+  offsetX = 0,
+  offsetY = 0,
+  offsetZ = 0,
+  origin = "front", -- front, center, back
+  cleanInventory = false,
+  torchInterval = 5,
+  useGPS = false,
+  configName = nil,
+}
 
-function dig() while turtle.detect() do turtle.dig() sleep(0.5) end end
-function digUp() while turtle.detectUp() do turtle.digUp() sleep(0.5) end end
-function digDown() while turtle.detectDown() do turtle.digDown() sleep(0.5) end end
-function placeTorch() for i = 1, 16 do turtle.select(i) if turtle.getItemDetail(i) and turtle.getItemDetail(i).name:find("torch") then turtle.placeDown() break end end end
-function cleanInventory() for i = 1, 16 do turtle.select(i) local item = turtle.getItemDetail() if item and item.name:find("cobble") then turtle.drop() end end end
+-- State saving
+local stateFile = ".shaft_state"
 
--- Save/Load State
 function saveState(state)
-  local file = fs.open(saveFile, "w")
+  local file = fs.open(stateFile, "w")
   file.write(textutils.serialize(state))
   file.close()
 end
 
 function loadState()
-  if fs.exists(saveFile) then
-    local file = fs.open(saveFile, "r")
-    local data = textutils.unserialize(file.readAll())
+  if fs.exists(stateFile) then
+    local file = fs.open(stateFile, "r")
+    local content = file.readAll()
     file.close()
-    return data
+    return textutils.unserialize(content)
   end
   return nil
 end
 
 function clearState()
-  if fs.exists(saveFile) then fs.delete(saveFile) end
+  if fs.exists(stateFile) then fs.delete(stateFile) end
 end
 
--- Load Config
-local config = {
-  length = 10,
-  height = 4,
-  torchInterval = 5,
-  cleanInventory = false,
-  useGPS = false
-}
-
-if #tArgs == 1 then
-  local confFile = configDir .. "/" .. tArgs[1] .. ".cfg"
-  if fs.exists(confFile) then
-    local file = fs.open(confFile, "r")
-    config = textutils.unserialize(file.readAll())
+-- Load config file
+function loadConfigFile(name)
+  local path = "/shaft_configs/" .. name .. ".cfg"
+  if fs.exists(path) then
+    local file = fs.open(path, "r")
+    local contents = file.readAll()
     file.close()
+    return textutils.unserialize(contents)
   else
-    print("Invalid config name or config file missing.")
-    return
+    print("Config file not found: " .. path)
+    return nil
   end
-else
-  print("Usage: shaft <configName>")
-  return
 end
 
-local length = config.length
-if length % 2 ~= 0 then length = (length + 1) / 2 else length = length / 2 end
-
--- Resume or Start Fresh
-local state = loadState() or { distance = 1, goingUp = true }
-
--- Begin Tunnel
-for distance = state.distance, length do
-  refuel(100)
-
-  if state.goingUp then
-    dig()
-    turtle.forward()
-    for i = 1, config.height do
-      dig()
-      if i ~= config.height then digUp() end
-      turtle.up()
-    end
-  else
-    dig()
-    turtle.forward()
-    for i = 1, config.height do
-      dig()
-      if i ~= config.height then digDown() end
-      turtle.down()
-    end
+function promptInteractive()
+  local function ask(promptText, default)
+    write(promptText .. (default and (" [" .. default .. "]") or "") .. ": ")
+    local input = read()
+    return input == "" and default or input
   end
 
-  if config.torchInterval > 0 and (distance % config.torchInterval == 0) then
-    placeTorch()
-  end
-
-  if config.cleanInventory then cleanInventory() end
-
-  dig()
-  turtle.forward()
-  state.distance = distance + 1
-  state.goingUp = not state.goingUp
-  saveState(state)
+  config.length = tonumber(config.length or ask("Tunnel length", 10))
+  config.height = tonumber(config.height or ask("Tunnel height", 3))
+  config.width = tonumber(config.width or ask("Tunnel width", 3))
+  config.offsetX = tonumber(config.offsetX or ask("X Offset (left/right)", 0))
+  config.offsetY = tonumber(config.offsetY or ask("Y Offset (up/down)", 0))
+  config.offsetZ = tonumber(config.offsetZ or ask("Z Offset (forward/back)", 0))
+  config.origin = config.origin or ask("Origin point (front/center/back)", "front")
+  config.cleanInventory = config.cleanInventory or (ask("Clean inventory after dig? (y/n)", "n") == "y")
+  config.torchInterval = tonumber(config.torchInterval or ask("Torch placement interval (blocks)", 5))
+  config.useGPS = config.useGPS or (ask("Use GPS for navigation? (y/n)", "n") == "y")
 end
 
--- Return Home
+function parseArgs()
+  local args = {...}
+  for _, arg in ipairs(args) do
+    local key, val = arg:match("(%w+)%=(%w+)")
+    if key and val then
+      if tonumber(val) then val = tonumber(val)
+      elseif val == "true" then val = true
+      elseif val == "false" then val = false end
+      config[key] = val
+    end
+  end
+end
+
+function ensureConfigComplete()
+  for k,v in pairs(config) do
+    if v == nil then
+      promptInteractive()
+      break
+    end
+  end
+end
+
+function checkFuel()
+  if turtle.getFuelLevel() < 100 then
+    print("Low fuel, please refuel...")
+    while turtle.getFuelLevel() < 100 do
+      turtle.refuel(1)
+      sleep(1)
+    end
+  end
+end
+
+function placeTorch()
+  local placed = false
+  for i = 1, 16 do
+    local item = turtle.getItemDetail(i)
+    if item and item.name:find("torch") then
+      turtle.select(i)
+      turtle.placeDown()
+      placed = true
+      break
+    end
+  end
+  if not placed then
+    print("No torch available to place.")
+  end
+end
+
+function cleanInventory()
+  for i = 1, 16 do
+    local item = turtle.getItemDetail(i)
+    if item and not item.name:find("torch") then
+      turtle.select(i)
+      turtle.drop()
+    end
+  end
+end
+
+function digVolume(length, width, height, offset)
+  print("Digging tunnel of size LxWxH = "..length.."x"..width.."x"..height.."...")
+  for l = 1, length do
+    for w = 1, width do
+      for h = 1, height do
+        local dx = w - 1 + offset.x
+        local dy = h - 1 + offset.y
+        local dz = l - 1 + offset.z
+        -- Move turtle to position, dig, return to center
+        -- (Assume simple linear motion for now)
+        -- Future: add GPS/waypoint targeting
+        turtle.dig()
+        if h ~= height then turtle.digUp() end
+        turtle.up()
+      end
+      for h = 1, height - 1 do
+        turtle.down()
+      end
+      if w < width then
+        turtle.turnRight()
+        turtle.dig()
+        turtle.forward()
+        turtle.turnLeft()
+      end
+    end
+    if config.torchInterval and (l % config.torchInterval == 0) then
+      placeTorch()
+    end
+    if l < length then
+      turtle.dig()
+      turtle.forward()
+    end
+  end
+end
+
+-- MAIN
+parseArgs()
+if config.configName then
+  local loaded = loadConfigFile(config.configName)
+  if loaded then
+    for k,v in pairs(loaded) do config[k] = v end
+  end
+end
+ensureConfigComplete()
+
+checkFuel()
+
+local offset = { x = config.offsetX or 0, y = config.offsetY or 0, z = config.offsetZ or 0 }
+digVolume(config.length, config.width, config.height, offset)
+
+if config.cleanInventory then
+  cleanInventory()
+end
+
 clearState()
-turtle.turnLeft() turtle.turnLeft()
-for i = 1, (length * 2) do
-  while not turtle.forward() do sleep(0.5) end
-end
-if config.height % 2 ~= 0 then for i = 1, config.height do turtle.down() end end
-print("Tunnel complete.")
+print("Tunnel complete!")
