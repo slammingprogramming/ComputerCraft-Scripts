@@ -35,35 +35,30 @@ local function move(dir)
   return (dir == "up" and turtle.up or dir == "down" and turtle.down or turtle.forward)()
 end
 
--- Digs and moves in a direction for n blocks
-local function tunnel(n, dir)
-  n = n or 1
-  dir = dir or "forward"
-  for _ = 1, n do
-    while detect(dir) do
-      if not dig(dir) then
-        error("Blocked by unbreakable block.")
-      end
-      sleep(0.4)
-    end
-    while not move(dir) do
-      sleep(0.2)
-    end
+-- Digs forward and up to make walkable path
+local function smartDigForward()
+  while detect() do
+    dig()
+    sleep(0.2)
+  end
+  while not move() do
+    sleep(0.2)
+  end
+  if detect("up") then
+    dig("up")
   end
 end
 
-local function turnRight()
-  turtle.turnRight()
+-- Digs a walkable 2-block-high tunnel
+local function walkableTunnel(n)
+  for _ = 1, n do
+    smartDigForward()
+  end
 end
 
-local function turnLeft()
-  turtle.turnLeft()
-end
-
-local function uTurn()
-  turnRight()
-  turnRight()
-end
+local function turnRight() turtle.turnRight() end
+local function turnLeft()  turtle.turnLeft() end
+local function uTurn()     turtle.turnRight() turtle.turnRight() end
 
 --=======================
 -- ROOM DIGGING LOGIC
@@ -72,30 +67,31 @@ end
 local function digRoom(length, width, height)
   for h = 1, height do
     for w = 1, width do
-      tunnel(length - 1)
+      walkableTunnel(length - 1)
 
       if w ~= width then
         if (w % 2 == 1) then
           turnRight()
-          tunnel()
+          smartDigForward()
           turnRight()
         else
           turnLeft()
-          tunnel()
+          smartDigForward()
           turnLeft()
         end
       end
     end
 
-    -- Return to front wall if needed
+    -- Return to starting wall
     if width % 2 == 1 then
       uTurn()
     end
-    tunnel(length - 1)
+    walkableTunnel(length - 1)
 
-    -- Move up a level if not last height
+    -- Move up a level if not done
     if h ~= height then
-      tunnel(1, "up")
+      while detect("up") do dig("up") sleep(0.2) end
+      while not move("up") do sleep(0.2) end
     end
   end
 end
@@ -105,30 +101,32 @@ end
 --=======================
 
 local function returnHome(length, width, height)
-  -- Return to bottom level
-  tunnel(height - 1, "down")
+  -- Return to ground level
+  for _ = 1, height - 1 do
+    move("down")
+  end
 
-  -- Return to origin on X-Y plane
-  if (width % 2 == 1) then
+  -- Return to front corner
+  if width % 2 == 1 then
     uTurn()
-    tunnel(width - 1)
+    walkableTunnel(width - 1)
     turnRight()
   else
     turnRight()
-    tunnel(1)
+    smartDigForward()
     turnRight()
-    tunnel(width - 1)
+    walkableTunnel(width - 1)
   end
 
-  tunnel(length - 1)
+  walkableTunnel(length - 1)
 end
 
 --=======================
 -- MAIN EXECUTION
 --=======================
 
-print("Digging room ", LENGTH, "x", WIDTH, "x", HEIGHT, "...")
-tunnel() -- initial move forward
+print("Digging walkable room ", LENGTH, "x", WIDTH, "x", HEIGHT, "...")
+smartDigForward() -- move into room
 digRoom(LENGTH, WIDTH, HEIGHT)
 print("Returning to start...")
 returnHome(LENGTH, WIDTH, HEIGHT)
