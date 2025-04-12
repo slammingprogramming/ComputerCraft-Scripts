@@ -81,46 +81,90 @@ local function digTunnel(config, startState)
   local offsetY = config.offsetY or 0
   local offsetZ = config.offsetZ or 0
 
-  local state = startState or { x = 0, step = 0 }
+  local state = startState or { step = 0 }
 
+  local function digBlock()
+    while turtle.detect() do
+      turtle.dig()
+      sleep(0.2)
+    end
+  end
+
+  local function digUp()
+    while turtle.detectUp() do
+      turtle.digUp()
+      sleep(0.2)
+    end
+  end
+
+  local function digDown()
+    while turtle.detectDown() do
+      turtle.digDown()
+      sleep(0.2)
+    end
+  end
+
+  local function moveForward()
+    while not turtle.forward() do
+      turtle.dig()
+      sleep(0.2)
+    end
+  end
+
+  -- Tunnel is dug from bottom-left corner, scanning row by row
   for step = state.step + 1, len do
-    print("Digging section " .. step .. " / " .. len)
-    
-    -- Dig out the full tunnel cross-section
+    print("🚧 Digging section " .. step .. " / " .. len)
+
     for h = 0, height - 1 do
       for w = 0, width - 1 do
-        turtle.select(1)
-        turtle.dig()
-        if h > 0 then turtle.digUp() end
+        -- Move to the correct horizontal offset
         if w > 0 then
           turtle.turnRight()
-          turtle.dig()
-          turtle.forward()
+          moveForward()
           turtle.turnLeft()
         end
+
+        -- Dig front, up, and down at this position
+        digBlock()
+        if h > 0 then
+          for i = 1, h do
+            turtle.up()
+            digBlock()
+            digUp()
+          end
+
+          for i = 1, h do
+            turtle.down()
+          end
+        else
+          digDown()
+        end
+
+        -- Move back to the original column if we moved sideways
+        if w > 0 then
+          turtle.turnLeft()
+          turtle.back()
+          turtle.turnRight()
+        end
       end
-      -- Move up
-      if h < height - 1 then turtle.up() end
     end
 
-    -- Return to base level
-    for i = 1, height - 1 do turtle.down() end
-
-    -- Torch placement
+    -- Place torch
     if placeTorches and step % torchEvery == 0 then
       placeTorch()
     end
 
-    -- Move forward one step
-    turtle.forward()
-
-    -- Inventory cleanup if needed
+    -- Cleanup inventory if enabled
     if cleanup then cleanInventory() end
 
-    saveState({ x = step, step = step })
+    -- Move forward one tunnel length
+    moveForward()
+
+    -- Save progress
+    saveState({ step = step })
   end
 
-  print("✅ Tunnel complete!")
+  print("✅ Tunnel complete.")
   clearState()
 end
 
