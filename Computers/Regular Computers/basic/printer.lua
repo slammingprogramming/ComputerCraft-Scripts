@@ -1,41 +1,38 @@
--- Printer Page Writer
-
--- Make sure there's a printer peripheral
+-- Find the printer peripheral by side or auto-detect
 local printer = peripheral.find("printer")
+
 if not printer then
-    print("No printer found. Please attach a printer.")
+    print("Error: No printer block found. Attach a printer.")
     return
 end
 
--- Get user input
+-- Prompt user for title and content
 term.clear()
-term.setCursorPos(1, 1)
-
-write("Enter the page title: ")
+term.setCursorPos(1,1)
+write("Enter a title for your page: ")
 local title = read()
 
-write("Enter the page content: ")
+write("Enter the content to print: ")
 local content = read()
 
--- Start a new page
+-- Try to start a new page
 if not printer.newPage() then
-    print("Failed to start a new page. Out of paper or ink?")
+    print("Error: Could not start a new page. Check paper and ink.")
     return
 end
 
--- Print the title in bold
+-- Write title centered and bold
 printer.setCursorPos(1, 1)
-printer.write("== " .. title .. " ==")
+printer.write("=== " .. title .. " ===")
 
--- Move to next line
+-- Leave a space, then write content starting at line 3
 printer.setCursorPos(1, 3)
-
--- Print the content (wraps automatically)
 printer.write(content)
 
--- End and print the page
-if not printer.endPage() then
-    print("Failed to print the page.")
-else
+-- End the page (physically prints it)
+local success = printer.endPage()
+if success then
     print("Page printed successfully!")
+else
+    print("Failed to end the page. Check printer again.")
 end
