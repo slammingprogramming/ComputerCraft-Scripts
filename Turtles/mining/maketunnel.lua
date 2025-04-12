@@ -1,238 +1,159 @@
--- Super Tunneler with Interactive Config and State Save/Resume
--- Turtle will mine tunnels with flexible dimensions and smart features.
+-- Supercharged Tunnel Digger with Configuration, Offsets, and Interactive Fallback
 
-local STATE_FILE = "tunnel_state"
-local CONFIG_FILE = "tunnel_config.txt"
-
--- Utilities
-local function prompt(msg, default)
-  io.write(msg .. (default and (" [" .. default .. "]") or "") .. ": ")
-  local input = read()
-  if input == "" and default then return default end
-  return input
+-- Utility Functions
+local function prompt(msg)
+  io.write(msg .. ": ")
+  return read()
 end
 
+local function toNumberOrDefault(str, default)
+  local num = tonumber(str)
+  return num or default
+end
+
+local function ensureFuel(minFuel)
+  if turtle.getFuelLevel() < minFuel then
+    print("Refueling...")
+    turtle.refuel()
+  end
+end
+
+local function digAndMove()
+  while turtle.detect() do turtle.dig(); sleep(0.2) end
+  while not turtle.forward() do turtle.dig(); sleep(0.2) end
+end
+
+local function digColumn(height)
+  for i = 1, height - 1 do
+    while turtle.detectUp() do turtle.digUp(); sleep(0.2) end
+    turtle.up()
+  end
+  for i = 1, height - 1 do
+    turtle.down()
+  end
+end
+
+local function returnToStart(width)
+  turtle.turnLeft()
+  for i = 1, width - 1 do
+    turtle.forward()
+  end
+  turtle.turnRight()
+end
+
+-- Torch Placement
+local function placeTorch()
+  turtle.turnRight()
+  turtle.turnRight()
+  turtle.select(1) -- Torch slot
+  turtle.place()
+  turtle.turnRight()
+  turtle.turnRight()
+end
+
+-- Inventory Cleanup (optional)
+local function cleanInventory()
+  for i = 2, 16 do
+    turtle.select(i)
+    turtle.drop()
+  end
+end
+
+-- Save/Resume
+local stateFile = "dig_tunnel.state"
+local configFile = "dig_tunnel.cfg"
+
 local function saveState(state)
-  local f = fs.open(STATE_FILE, "w")
-  f.write(textutils.serialize(state))
-  f.close()
+  local file = fs.open(stateFile, "w")
+  file.write(textutils.serialize(state))
+  file.close()
 end
 
 local function loadState()
-  if fs.exists(STATE_FILE) then
-    local f = fs.open(STATE_FILE, "r")
-    local state = textutils.unserialize(f.readAll())
-    f.close()
-    return state
-  end
-  return nil
+  if not fs.exists(stateFile) then return nil end
+  local file = fs.open(stateFile, "r")
+  local data = file.readAll()
+  file.close()
+  return textutils.unserialize(data)
 end
 
 local function clearState()
-  if fs.exists(STATE_FILE) then fs.delete(STATE_FILE) end
+  if fs.exists(stateFile) then fs.delete(stateFile) end
 end
 
-local function refuelIfNeeded()
-  if turtle.getFuelLevel() == "unlimited" then return true end
-  if turtle.getFuelLevel() < 100 then
-    for i = 1, 16 do
-      turtle.select(i)
-      if turtle.refuel(1) then
-        print("Refueled.")
-        return true
-      end
-    end
-    print("⚠️ Low fuel and no fuel items found.")
-    return false
+-- Load or prompt for configuration
+local function loadConfig(tArgs)
+  local config = {}
+
+  if fs.exists(configFile) then
+    local file = fs.open(configFile, "r")
+    config = textutils.unserialize(file.readAll())
+    file.close()
   end
-  return true
+
+  config.length = tonumber(tArgs[1]) or config.length or toNumberOrDefault(prompt("Tunnel length"), 10)
+  config.width  = tonumber(tArgs[2]) or config.width or toNumberOrDefault(prompt("Tunnel width"), 3)
+  config.height = tonumber(tArgs[3]) or config.height or toNumberOrDefault(prompt("Tunnel height"), 3)
+  config.placeTorches = config.placeTorches ~= false
+  config.torchEvery = config.torchEvery or 5
+  config.cleanup = config.cleanup or false
+  config.offsetX = config.offsetX or 0
+  config.offsetY = config.offsetY or 0
+  config.offsetZ = config.offsetZ or 0
+  return config
 end
 
-local function placeTorch()
-  for i = 1, 16 do
-    turtle.select(i)
-    local detail = turtle.getItemDetail()
-    if detail and (detail.name:lower():find("torch") or detail.name:lower():find("lantern")) then
-      turtle.placeDown()
-      return
-    end
-  end
-end
-
-local function cleanInventory()
-  for i = 1, 16 do
-    turtle.select(i)
-    local detail = turtle.getItemDetail()
-    if detail and not (detail.name:lower():find("torch") or detail.name:lower():find("fuel")) then
-      turtle.drop()
-    end
-  end
-end
-
--- Tunnel Builder
+-- Main dig loop
 local function digTunnel(config, startState)
   local len = config.length
   local width = config.width
   local height = config.height
-  local torchEvery = config.torchEvery
   local placeTorches = config.placeTorches
+  local torchEvery = config.torchEvery
   local cleanup = config.cleanup
-  local offsetX = config.offsetX or 0
-  local offsetY = config.offsetY or 0
-  local offsetZ = config.offsetZ or 0
-
   local state = startState or { step = 0 }
 
-  local function digBlock()
-    while turtle.detect() do
-      turtle.dig()
-      sleep(0.2)
-    end
-  end
-
-  local function digUp()
-    while turtle.detectUp() do
-      turtle.digUp()
-      sleep(0.2)
-    end
-  end
-
-  local function digDown()
-    while turtle.detectDown() do
-      turtle.digDown()
-      sleep(0.2)
-    end
-  end
-
-  local function moveForward()
-    while not turtle.forward() do
-      turtle.dig()
-      sleep(0.2)
-    end
-  end
-
-  -- Tunnel is dug from bottom-left corner, scanning row by row
   for step = state.step + 1, len do
-    print("🚧 Digging section " .. step .. " / " .. len)
+    print("Digging segment " .. step .. "/" .. len)
 
-    for h = 0, height - 1 do
-      for w = 0, width - 1 do
-        -- Move to the correct horizontal offset
-        if w > 0 then
-          turtle.turnRight()
-          moveForward()
-          turtle.turnLeft()
-        end
+    for w = 0, width - 1 do
+      if w > 0 then
+        turtle.turnRight()
+        turtle.forward()
+        turtle.turnLeft()
+      end
+      digAndMove()
+      digColumn(height)
+      turtle.turnLeft()
+      for i = 1, height - 1 do turtle.up() end
+      for i = 1, height - 1 do turtle.down() end
+      turtle.turnRight()
 
-        -- Dig front, up, and down at this position
-        digBlock()
-        if h > 0 then
-          for i = 1, h do
-            turtle.up()
-            digBlock()
-            digUp()
-          end
-
-          for i = 1, h do
-            turtle.down()
-          end
-        else
-          digDown()
-        end
-
-        -- Move back to the original column if we moved sideways
-        if w > 0 then
-          turtle.turnLeft()
-          turtle.back()
-          turtle.turnRight()
-        end
+      if w > 0 then
+        turtle.turnLeft()
+        turtle.back()
+        turtle.turnRight()
       end
     end
 
-    -- Place torch
+    -- Place torch every N segments
     if placeTorches and step % torchEvery == 0 then
       placeTorch()
     end
 
-    -- Cleanup inventory if enabled
     if cleanup then cleanInventory() end
 
-    -- Move forward one tunnel length
-    moveForward()
-
-    -- Save progress
+    digAndMove()
     saveState({ step = step })
   end
 
-  print("✅ Tunnel complete.")
+  print("Tunnel complete!")
   clearState()
 end
 
--- Load config file (optional)
-local function loadConfigFromFile(filename)
-  if not fs.exists(filename) then return nil end
-  local f = fs.open(filename, "r")
-  local data = textutils.unserialize(f.readAll())
-  f.close()
-  return data
-end
-
--- Main Entry
+-- Entry
 local args = {...}
-local config = {}
-
--- Check for saved state
-local savedState = loadState()
-if savedState then
-  print("⚠️ Resume previous session?")
-  print("Y to resume, anything else to start new")
-  local r = read()
-  if r:lower() == "y" then
-    config = loadConfigFromFile(CONFIG_FILE)
-    if not config then
-      print("❌ Config file missing. Cannot resume.")
-      return
-    end
-    digTunnel(config, savedState)
-    return
-  else
-    clearState()
-  end
-end
-
--- CLI arguments
-local lengthArg = tonumber(args[1])
-local widthArg = tonumber(args[2])
-local heightArg = tonumber(args[3])
-
--- Interactive prompts if missing args
-if not (lengthArg and widthArg and heightArg) then
-  print("🛠 Tunnel Builder - Interactive Setup")
-  config.length = tonumber(prompt("Tunnel length", "20"))
-  config.width = tonumber(prompt("Tunnel width", "3"))
-  config.height = tonumber(prompt("Tunnel height", "3"))
-else
-  config.length = lengthArg
-  config.width = widthArg
-  config.height = heightArg
-end
-
-config.placeTorches = prompt("Place torches? (y/n)", "y"):lower() == "y"
-config.torchEvery = tonumber(prompt("Torch every N blocks", "5"))
-config.cleanup = prompt("Drop blocks? (y/n)", "n"):lower() == "y"
-config.offsetX = tonumber(prompt("X offset from turtle position", "0"))
-config.offsetY = tonumber(prompt("Y offset (vertical)", "0"))
-config.offsetZ = tonumber(prompt("Z offset (forward)", "0"))
-
--- Save config for future resume
-local f = fs.open(CONFIG_FILE, "w")
-f.write(textutils.serialize(config))
-f.close()
-
-if not refuelIfNeeded() then
-  print("❌ Aborting due to low fuel.")
-  return
-end
-
--- Begin tunneling
-digTunnel(config)
+local config = loadConfig(args)
+local startState = loadState()
+ensureFuel(config.length * config.width * config.height)
+digTunnel(config, startState)
