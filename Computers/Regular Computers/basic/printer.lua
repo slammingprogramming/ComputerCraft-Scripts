@@ -1,30 +1,41 @@
--- Interactive Page Writer
+-- Printer Page Writer
 
--- Clear and setup
+-- Make sure there's a printer peripheral
+local printer = peripheral.find("printer")
+if not printer then
+    print("No printer found. Please attach a printer.")
+    return
+end
+
+-- Get user input
 term.clear()
 term.setCursorPos(1, 1)
 
--- Get title input
 write("Enter the page title: ")
 local title = read()
 
--- Get content input
 write("Enter the page content: ")
 local content = read()
 
--- Display the page
-term.clear()
-term.setCursorPos(1, 1)
+-- Start a new page
+if not printer.newPage() then
+    print("Failed to start a new page. Out of paper or ink?")
+    return
+end
 
--- Set title in bold (if available)
-term.setTextColor(colors.yellow)
-print("=== " .. title .. " ===")
-term.setTextColor(colors.white)
+-- Print the title in bold
+printer.setCursorPos(1, 1)
+printer.write("== " .. title .. " ==")
 
-print("")
-print(content)
-print("")
+-- Move to next line
+printer.setCursorPos(1, 3)
 
--- Wait for the user to press a key to exit
-print("\nPress any key to exit...")
-os.pullEvent("key")
+-- Print the content (wraps automatically)
+printer.write(content)
+
+-- End and print the page
+if not printer.endPage() then
+    print("Failed to print the page.")
+else
+    print("Page printed successfully!")
+end
