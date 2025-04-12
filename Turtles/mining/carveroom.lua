@@ -35,17 +35,33 @@ local function move(dir)
   return (dir == "up" and turtle.up or dir == "down" and turtle.down or turtle.forward)()
 end
 
--- Digs forward and up to make walkable path
+-- Ensures the turtle digs a 2-block-high tunnel segment
 local function smartDigForward()
-  while detect() do
-    dig()
+  -- Dig block in front
+  while turtle.detect() do
+    turtle.dig()
     sleep(0.2)
   end
-  while not move() do
+
+  -- Dig block above (in front)
+  turtle.turnLeft()
+  turtle.turnLeft()
+  turtle.up()
+  if turtle.detect() then
+    turtle.dig()
+  end
+  turtle.down()
+  turtle.turnLeft()
+  turtle.turnLeft()
+
+  -- Move forward
+  while not turtle.forward() do
     sleep(0.2)
   end
-  if detect("up") then
-    dig("up")
+
+  -- Dig block above (where we are now)
+  if turtle.detectUp() then
+    turtle.digUp()
   end
 end
 
